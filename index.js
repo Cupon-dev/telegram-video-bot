@@ -8,7 +8,7 @@ const app = express();
 app.use(express.json());
 
 // Get token from environment variable (more secure)
-const BOT_TOKEN = process.env.BOT_TOKEN || '8488820587:AAFZDX8oBrQai2qe6_t25PoF3v5Uulz9P54';
+const BOT_TOKEN = process.env.BOT_TOKEN || ''; // Get token from environment variable
 const bot = new TelegramBot(BOT_TOKEN, { polling: false });
 
 // Your video player URL
