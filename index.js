@@ -177,22 +177,53 @@ bot.on('text', async (msg) => {
 // Function to post to channel (admin only)
 async function postToChannel(session, userChatId) {
     try {
+        console.log(`Attempting to post to channel: ${YOUR_CHANNEL_ID}`);
+        
+        // First, test if bot can send simple message to channel
+        try {
+            const testMessage = await bot.sendMessage(YOUR_CHANNEL_ID, 'Testing bot access...');
+            await bot.deleteMessage(YOUR_CHANNEL_ID, testMessage.message_id);
+            console.log('✅ Bot has basic access to channel');
+        } catch (testError) {
+            console.error('❌ Bot cannot access channel:', testError.message);
+            throw new Error('Bot does not have permission to post in channel');
+        }
+        
         // Post to your channel
-        await bot.sendPhoto(YOUR_CHANNEL_ID, session.imageFileId, {
+        const channelPost = await bot.sendPhoto(YOUR_CHANNEL_ID, session.imageFileId, {
             caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: "▶️ Watch Now", url: session.hiddenVideoLink }
+                    { text: "▶️ Watch Video", url: session.hiddenVideoLink }
                 ]]
             }
         });
         
+        console.log('✅ Successfully posted to channel');
         bot.sendMessage(userChatId, '✅ Successfully posted to your channel!');
         
     } catch (error) {
-        console.error('Channel posting error:', error);
-        bot.sendMessage(userChatId, '❌ Failed to post to channel. Make sure:\n1. Bot is admin in your channel\n2. Channel ID is correct in environment variables');
+        console.error('Channel posting error details:', error.message);
+        
+        let errorMessage = '❌ Failed to post to channel.\n\n';
+        
+        if (error.message.includes('chat not found')) {
+            errorMessage += '• Channel ID is incorrect\n';
+            errorMessage += `• Current Channel ID: ${YOUR_CHANNEL_ID}\n`;
+            errorMessage += '• Channel ID should look like: -1001234567890\n';
+        } else if (error.message.includes('not enough rights')) {
+            errorMessage += '• Bot is not admin in your channel\n';
+            errorMessage += '• Add bot as admin with "Post Messages" permission\n';
+        } else if (error.message.includes('permission')) {
+            errorMessage += '• Bot needs "Post Messages" permission\n';
+        } else {
+            errorMessage += `• Error: ${error.message}\n`;
+        }
+        
+        errorMessage += '\nPlease check:\n1. Bot is admin in channel\n2. Channel ID is correct\n3. Bot has "Post Messages" permission';
+        
+        bot.sendMessage(userChatId, errorMessage);
     }
 }
 
