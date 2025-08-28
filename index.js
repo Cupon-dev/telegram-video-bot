@@ -94,6 +94,22 @@ bot.onText(/\/mychannels/, (msg) => {
     });
 });
 
+// Add this command to clear sessions
+bot.onText(/\/clearsessions/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id.toString();
+    
+    if (userId !== YOUR_USER_ID) {
+        bot.sendMessage(chatId, '❌ Admin only.');
+        return;
+    }
+    
+    const sessionCount = userSessions.size;
+    userSessions.clear();
+    
+    bot.sendMessage(chatId, `✅ Cleared ${sessionCount} old sessions!\n\nNow create a NEW post (send image + link) and it will use web_app properly.`);
+});
+
 // Admin command to post to channels
 bot.onText(/\/post/, (msg) => {
     const chatId = msg.chat.id;
