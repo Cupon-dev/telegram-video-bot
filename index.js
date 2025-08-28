@@ -1,8 +1,11 @@
-// Secure Telegram Bot with Admin-Only Channel Posting
+// Automated Telegram Posting System
 // Deploy on Railway for 24/7 operation
 
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const cron = require('node-cron');
 
 const app = express();
 app.use(express.json());
@@ -17,11 +20,19 @@ const PLAYER_URL = process.env.PLAYER_URL || 'https://bplyrrr.netlify.app';
 // Webhook URL will be set automatically
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-// Your personal Telegram User ID (get it from @userinfobot)
+// Your personal Telegram User ID
 const YOUR_USER_ID = process.env.ADMIN_USER_ID || '';
 
-// Your channel ID where the bot should post (get it from @username_to_id_bot)
-const YOUR_CHANNEL_ID = process.env.CHANNEL_ID || '';
+// Channels configuration
+const CHANNELS_CONFIG = process.env.CHANNELS_CONFIG || '';
+const yourChannels = parseChannelsConfig(CHANNELS_CONFIG);
+
+// Posting schedules for each channel
+const CHANNEL_SCHEDULES = process.env.CHANNEL_SCHEDULES || '';
+const channelSchedules = parseSchedulesConfig(CHANNEL_SCHEDULES);
+
+// Content folder path
+const CONTENT_FOLDER = process.env.CONTENT_FOLDER || './content';
 
 // Webhook endpoint
 app.post('/webhook', (req, res) => {
@@ -29,216 +40,110 @@ app.post('/webhook', (req, res) => {
     res.sendStatus(200);
 });
 
-// Bot commands and message handlers
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    const isAdmin = msg.from.id.toString() === YOUR_USER_ID;
-    
-    let message = `🎬 *Video Link Bot*
-
-*How to use:*
-1️⃣ Send me an image
-2️⃣ Send your video link
-3️⃣ I'll create a clean shareable post`;
-
-    if (isAdmin) {
-        message += `\n\n*Admin Command:*\nUse /postchannel to share directly to your channel`;
-    }
-
-    bot.sendMessage(chatId, message, {
-        parse_mode: 'Markdown'
+// Parse channels configuration
+function parseChannelsConfig(config) {
+    if (!config) return {};
+    const channels = {};
+    config.split(',').forEach(channel => {
+        const [id, name] = channel.split(':');
+        if (id && name) {
+            channels[id.trim()] = name.trim();
+        }
     });
-});
-
-/// Admin-only command to post directly to channel
-bot.onText(/\/postchannel/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    
-    // DEBUG: Check what values we're getting
-    console.log(`DEBUG: User ID: ${userId}, Admin ID: '${YOUR_USER_ID}', Match: ${userId === YOUR_USER_ID}`);
-    
-    // SECURITY CHECK: Only you can use this command
-    if (userId !== YOUR_USER_ID) {
-        bot.sendMessage(chatId, `❌ Admin only. Your ID: ${userId}, Expected: ${YOUR_USER_ID || 'NOT_SET'}`);
-        return;
-    }
-    
-    const session = userSessions.get(chatId);
-    if (!session || session.step !== 'ready') {
-        bot.sendMessage(chatId, '❌ Please create a post first (send image + video link).');
-        return;
-    }
-    
-    // Post directly to your channel
-    postToChannel(session, chatId);
-});
-
-// Store user sessions
-const userSessions = new Map();
-
-// Handle image uploads
-bot.on('photo', async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    const isAdmin = userId === YOUR_USER_ID;
-    
-    try {
-        // Get the highest resolution photo
-        const photo = msg.photo[msg.photo.length - 1];
-        const fileId = photo.file_id;
-        
-        // Store in session
-        userSessions.set(chatId, {
-            imageFileId: fileId,
-            step: 'waiting_video',
-            timestamp: Date.now(),
-            isAdmin: isAdmin,
-            userId: userId
-        });
-        
-        let message = `📸 *Image received!*
-
-Now send me your video link:
-\`https://iframe.mediadelivery.net/play/...\``;
-
-        if (isAdmin) {
-            message += `\n\nAfter sending the link, use /postchannel to share directly to your channel.`;
-        }
-
-        bot.sendMessage(chatId, message, {
-            parse_mode: 'Markdown'
-        });
-        
-    } catch (error) {
-        console.error('Photo processing error:', error);
-        bot.sendMessage(chatId, '❌ Error processing image. Please try again.');
-    }
-});
-
-// Handle text messages (video links)
-bot.on('text', async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    const userId = msg.from.id.toString();
-    const isAdmin = userId === YOUR_USER_ID;
-    
-    // Skip commands
-    if (text.startsWith('/')) return;
-    
-    const session = userSessions.get(chatId);
-    
-    if (session && session.step === 'waiting_video') {
-        // Check if it looks like a video URL
-        if (text.includes('mediadelivery.net') || text.includes('iframe')) {
-            try {
-                const videoInfo = extractVideoInfo(text);
-                
-                if (!videoInfo) {
-                    bot.sendMessage(chatId, '❌ Invalid video URL format. Please send a valid mediadelivery.net link.');
-                    return;
-                }
-                
-                // Generate the hidden video link
-                const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
-                
-                // Update session
-                session.hiddenVideoLink = hiddenVideoLink;
-                session.step = 'ready';
-                
-                // Create forwardable post for everyone
-                await bot.sendPhoto(chatId, session.imageFileId, {
-                    caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: "▶️ Watch Now", url: hiddenVideoLink }
-                        ]]
-                    }
-                });
-                
-                // Additional option for admin
-                if (isAdmin) {
-                    bot.sendMessage(chatId, '✅ Personal post created! Use /postchannel to share to your channel.');
-                }
-                
-            } catch (error) {
-                console.error('Video processing error:', error);
-                bot.sendMessage(chatId, '❌ Error processing video link. Please check the URL and try again.');
-            }
-        } else {
-            bot.sendMessage(chatId, '❌ Please send a valid video URL (should contain "mediadelivery.net")');
-        }
-    } else {
-        bot.sendMessage(chatId, '📷 Please start by sending me an image first!');
-    }
-});
-
-// Function to post to channel (admin only)
-async function postToChannel(session, userChatId) {
-    try {
-        console.log(`Attempting to post to channel: ${YOUR_CHANNEL_ID}`);
-        
-        // First, test if bot can send simple message to channel
-        try {
-            const testMessage = await bot.sendMessage(YOUR_CHANNEL_ID, 'Testing bot access...');
-            await bot.deleteMessage(YOUR_CHANNEL_ID, testMessage.message_id);
-            console.log('✅ Bot has basic access to channel');
-        } catch (testError) {
-            console.error('❌ Bot cannot access channel:', testError.message);
-            throw new Error('Bot does not have permission to post in channel');
-        }
-        
-        // Post to your channel
-        const channelPost = await bot.sendPhoto(YOUR_CHANNEL_ID, session.imageFileId, {
-            caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "▶️ Watch Video", url: session.hiddenVideoLink }
-                ]]
-            }
-        });
-        
-        console.log('✅ Successfully posted to channel');
-        bot.sendMessage(userChatId, '✅ Successfully posted to your channel!');
-        
-    } catch (error) {
-        console.error('Channel posting error details:', error.message);
-        
-        let errorMessage = '❌ Failed to post to channel.\n\n';
-        
-        if (error.message.includes('chat not found')) {
-            errorMessage += '• Channel ID is incorrect\n';
-            errorMessage += `• Current Channel ID: ${YOUR_CHANNEL_ID}\n`;
-            errorMessage += '• Channel ID should look like: -1001234567890\n';
-        } else if (error.message.includes('not enough rights')) {
-            errorMessage += '• Bot is not admin in your channel\n';
-            errorMessage += '• Add bot as admin with "Post Messages" permission\n';
-        } else if (error.message.includes('permission')) {
-            errorMessage += '• Bot needs "Post Messages" permission\n';
-        } else {
-            errorMessage += `• Error: ${error.message}\n`;
-        }
-        
-        errorMessage += '\nPlease check:\n1. Bot is admin in channel\n2. Channel ID is correct\n3. Bot has "Post Messages" permission';
-        
-        bot.sendMessage(userChatId, errorMessage);
-    }
+    return channels;
 }
 
-// Clean up old sessions
-setInterval(cleanupSessions, 60 * 60 * 1000);
-
-function cleanupSessions() {
-    const oneHourAgo = Date.now() - (60 * 60 * 1000);
-    for (const [chatId, session] of userSessions.entries()) {
-        if (session.timestamp < oneHourAgo) {
-            userSessions.delete(chatId);
+// Parse schedules configuration
+function parseSchedulesConfig(config) {
+    if (!config) return {};
+    const schedules = {};
+    config.split(';').forEach(schedule => {
+        const [channelId, cronPattern] = schedule.split(':');
+        if (channelId && cronPattern) {
+            schedules[channelId.trim()] = cronPattern.trim();
         }
-    }
+    });
+    return schedules;
 }
 
+// Initialize content folder
+function initContentFolder() {
+    if (!fs.existsSync(CONTENT_FOLDER)) {
+        fs.mkdirSync(CONTENT_FOLDER, { recursive: true });
+        console.log(`📁 Created content folder: ${CONTENT_FOLDER}`);
+    }
+    
+    // Create subfolders for each channel
+    Object.keys(yourChannels).forEach(channelId => {
+        const channelFolder = path.join(CONTENT_FOLDER, channelId);
+        if (!fs.existsSync(channelFolder)) {
+            fs.mkdirSync(channelFolder, { recursive: true });
+        }
+    });
+}
+
+// Scan content folder for new files
+function scanContentFolder() {
+    const content = {};
+    
+    Object.keys(yourChannels).forEach(channelId => {
+        const channelFolder = path.join(CONTENT_FOLDER, channelId);
+        if (fs.existsSync(channelFolder)) {
+            const files = fs.readdirSync(channelFolder);
+            content[channelId] = files.filter(file => 
+                file.endsWith('.txt') || 
+                ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file).toLowerCase())
+            );
+        }
+    });
+    
+    return content;
+}
+
+// Get random content for channel
+function getRandomContent(channelId) {
+    const channelFolder = path.join(CONTENT_FOLDER, channelId);
+    if (!fs.existsSync(channelFolder)) return null;
+    
+    const files = fs.readdirSync(channelFolder);
+    const textFiles = files.filter(file => file.endsWith('.txt'));
+    const imageFiles = files.filter(file => 
+        ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file).toLowerCase())
+    );
+    
+    if (textFiles.length === 0 || imageFiles.length === 0) return null;
+    
+    // Get random text file and matching image
+    const randomTextFile = textFiles[Math.floor(Math.random() * textFiles.length)];
+    const baseName = path.parse(randomTextFile).name;
+    
+    // Try to find matching image
+    let matchingImage = imageFiles.find(img => 
+        path.parse(img).name === baseName
+    );
+    
+    // If no matching image, get random image
+    if (!matchingImage && imageFiles.length > 0) {
+        matchingImage = imageFiles[Math.floor(Math.random() * imageFiles.length)];
+    }
+    
+    if (!matchingImage) return null;
+    
+    // Read video URL from text file
+    const textFilePath = path.join(channelFolder, randomTextFile);
+    const videoUrl = fs.readFileSync(textFilePath, 'utf8').trim();
+    
+    const imagePath = path.join(channelFolder, matchingImage);
+    
+    return {
+        videoUrl,
+        imagePath,
+        textFile: randomTextFile,
+        imageFile: matchingImage
+    };
+}
+
+// Process video URL
 function extractVideoInfo(url) {
     try {
         const urlObj = new URL(url);
@@ -256,12 +161,219 @@ function extractVideoInfo(url) {
     }
 }
 
+// Post to channel
+async function postToChannel(channelId, content) {
+    try {
+        const videoInfo = extractVideoInfo(content.videoUrl);
+        if (!videoInfo) {
+            console.error('Invalid video URL:', content.videoUrl);
+            return false;
+        }
+        
+        const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
+        
+        // Read image file
+        const imageBuffer = fs.readFileSync(content.imagePath);
+        
+        // Post to channel
+        await bot.sendPhoto(channelId, imageBuffer, {
+            caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[
+                    { 
+                        text: "▶️ Play Now", 
+                        web_app: { url: hiddenVideoLink }
+                    }
+                ]]
+            }
+        });
+        
+        console.log(`✅ Posted to ${yourChannels[channelId] || channelId}`);
+        
+        // Move used files to archive folder
+        archiveContent(channelId, content.textFile, content.imageFile);
+        
+        return true;
+    } catch (error) {
+        console.error('Error posting to channel:', error);
+        return false;
+    }
+}
+
+// Archive used content
+function archiveContent(channelId, textFile, imageFile) {
+    const archiveFolder = path.join(CONTENT_FOLDER, channelId, 'archive');
+    if (!fs.existsSync(archiveFolder)) {
+        fs.mkdirSync(archiveFolder, { recursive: true });
+    }
+    
+    const channelFolder = path.join(CONTENT_FOLDER, channelId);
+    
+    // Add timestamp to avoid overwriting
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    
+    if (textFile) {
+        const oldPath = path.join(channelFolder, textFile);
+        const newPath = path.join(archiveFolder, `${timestamp}_${textFile}`);
+        if (fs.existsSync(oldPath)) {
+            fs.renameSync(oldPath, newPath);
+        }
+    }
+    
+    if (imageFile) {
+        const oldPath = path.join(channelFolder, imageFile);
+        const newPath = path.join(archiveFolder, `${timestamp}_${imageFile}`);
+        if (fs.existsSync(oldPath)) {
+            fs.renameSync(oldPath, newPath);
+        }
+    }
+}
+
+// Setup scheduled posting
+function setupScheduledPosting() {
+    Object.entries(channelSchedules).forEach(([channelId, cronPattern]) => {
+        if (cron.validate(cronPattern)) {
+            cron.schedule(cronPattern, async () => {
+                console.log(`⏰ Running scheduled post for channel ${channelId}`);
+                
+                const content = getRandomContent(channelId);
+                if (content) {
+                    await postToChannel(channelId, content);
+                } else {
+                    console.log(`❌ No content available for channel ${channelId}`);
+                }
+            });
+            
+            console.log(`✅ Scheduled posting for channel ${channelId}: ${cronPattern}`);
+        } else {
+            console.error(`❌ Invalid cron pattern for channel ${channelId}: ${cronPattern}`);
+        }
+    });
+}
+
+// Manual post command
+bot.onText(/\/postnow(?:\s+(\S+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id.toString();
+    
+    if (userId !== YOUR_USER_ID) {
+        bot.sendMessage(chatId, '❌ This command is for admin only.');
+        return;
+    }
+    
+    let targetChannelId = match[1];
+    
+    // If no channel specified, show selection
+    if (!targetChannelId) {
+        const keyboard = {
+            inline_keyboard: Object.entries(yourChannels).map(([id, name]) => [
+                { 
+                    text: `📢 ${name}`, 
+                    callback_data: `post_now:${id}`
+                }
+            ])
+        };
+        
+        bot.sendMessage(chatId, '📍 *Select channel to post now:*', {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+        return;
+    }
+    
+    // Post to specified channel
+    try {
+        const content = getRandomContent(targetChannelId);
+        if (content) {
+            await postToChannel(targetChannelId, content);
+            bot.sendMessage(chatId, `✅ Posted to ${yourChannels[targetChannelId] || targetChannelId}`);
+        } else {
+            bot.sendMessage(chatId, `❌ No content available for channel ${targetChannelId}`);
+        }
+    } catch (error) {
+        bot.sendMessage(chatId, `❌ Error posting to channel: ${error.message}`);
+    }
+});
+
+// Handle callback queries
+bot.on('callback_query', async (callbackQuery) => {
+    const message = callbackQuery.message;
+    const chatId = message.chat.id;
+    const data = callbackQuery.data;
+    const userId = callbackQuery.from.id.toString();
+    
+    if (userId !== YOUR_USER_ID) {
+        bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Admin only feature.' });
+        return;
+    }
+    
+    if (data.startsWith('post_now:')) {
+        const channelId = data.split(':')[1];
+        const content = getRandomContent(channelId);
+        
+        if (content) {
+            await postToChannel(channelId, content);
+            bot.editMessageText(`✅ Posted to ${yourChannels[channelId] || channelId}`, {
+                chat_id: chatId,
+                message_id: message.message_id
+            });
+        } else {
+            bot.editMessageText(`❌ No content available for channel ${channelId}`, {
+                chat_id: chatId,
+                message_id: message.message_id
+            });
+        }
+    }
+});
+
+// Content status command
+bot.onText(/\/contentstatus/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id.toString();
+    
+    if (userId !== YOUR_USER_ID) {
+        bot.sendMessage(chatId, '❌ This command is for admin only.');
+        return;
+    }
+    
+    const content = scanContentFolder();
+    let message = '📊 *Content Status:*\n\n';
+    
+    Object.entries(content).forEach(([channelId, files]) => {
+        const textFiles = files.filter(f => f.endsWith('.txt')).length;
+        const imageFiles = files.filter(f => 
+            ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
+        ).length;
+        
+        message += `• ${yourChannels[channelId] || channelId}: ${textFiles} texts, ${imageFiles} images\n`;
+    });
+    
+    bot.sendMessage(chatId, message, {
+        parse_mode: 'Markdown'
+    });
+});
+
+// Initialize the system
+function initialize() {
+    initContentFolder();
+    setupScheduledPosting();
+    
+    console.log('🤖 Automated posting system initialized');
+    console.log('📁 Content folder:', CONTENT_FOLDER);
+    console.log('📺 Channels:', Object.keys(yourChannels).length);
+    console.log('⏰ Schedules:', Object.keys(channelSchedules).length);
+}
+
 // Health check
 app.get('/', (req, res) => {
+    const content = scanContentFolder();
     res.json({ 
         status: 'Bot is running!',
         timestamp: new Date().toISOString(),
-        activeSessions: userSessions.size
+        channels: Object.keys(yourChannels),
+        schedules: channelSchedules,
+        content: content
     });
 });
 
@@ -284,6 +396,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🤖 Telegram bot server running on port ${PORT}`);
     setupWebhook();
+    initialize();
 });
 
 module.exports = app;
