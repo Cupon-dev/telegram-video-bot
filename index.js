@@ -12,7 +12,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || ''; // Get token from environment var
 const bot = new TelegramBot(BOT_TOKEN, { polling: false });
 
 // Your video player URL
-const PLAYER_URL = process.env.PLAYER_URL || 'https://bplyrr.netlify.app';
+const PLAYER_URL = process.env.PLAYER_URL || 'https://bplyrrr.netlify.app';
 
 // Webhook URL will be set automatically based on deployment platform
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
@@ -97,29 +97,39 @@ bot.on('text', async (msg) => {
                 // Generate the hidden video link
                 const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
                 
-                // Send the image with a CLEAN, ATTRACTIVE button
-                await bot.sendPhoto(chatId, session.imageFileId, {
-                    caption: " ", // Invisible caption
+                // 1. Send the image with the Web App button
+                const sentMessage = await bot.sendPhoto(chatId, session.imageFileId, {
+                    caption: "_Installing player..._", // Show a temporary, cool message
+                    parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [[
                             { 
-                                text: "▶️ Watch Now", // Clear, enticing call to action
-                                url: hiddenVideoLink
-                            }]
-                        ]
+                                text: "🎯 PLAY NOW", 
+                                web_app: { url: hiddenVideoLink } // The magic for native experience
+                            }
+                        ]]
                     }
                 });
                 
-                // Clean up the previous messages for a tidy chat
+                // 2. Wait a moment, then replace the message with a clean, final image
+                setTimeout(async () => {
+                    try {
+                        // Delete the initial message with the button
+                        await bot.deleteMessage(chatId, sentMessage.message_id);
+                        // Send the clean, final image (no button, no caption)
+                        await bot.sendPhoto(chatId, session.imageFileId, { caption: " " });
+                    } catch (e) { 
+                        console.log("Final touch cleanup failed, but main experience worked.");
+                    }
+                }, 1500); // Wait 1.5 seconds
+                
+                // 3. SILENTLY clean up the user's messages
                 try {
                     await bot.deleteMessage(chatId, msg.message_id); // User's link
                     await bot.deleteMessage(chatId, msg.message_id - 1); // Bot's "Image received" message
                 } catch (deleteError) {
-                    console.log("Cleanup not possible. Experience is still good.");
+                    // If deletion fails, fail silently. The main feature still works.
                 }
-                
-                // Clear session
-                userSessions.delete(chatId);
                 
                 // Clear session
                 userSessions.delete(chatId);
