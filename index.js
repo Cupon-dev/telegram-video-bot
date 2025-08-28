@@ -85,19 +85,32 @@ function extractVideoInfo(url) {
     }
 }
 
-// Create web app button markup
-function createWebAppMarkup(url) {
+// Create button markup with fallback options
+function createVideoButtonMarkup(url, useWebApp = true) {
     // Ensure URL is properly formatted
     const cleanUrl = url.trim();
     
-    return {
-        inline_keyboard: [[
-            { 
-                text: "▶️ Play Video", 
-                web_app: { url: cleanUrl }
-            }
-        ]]
-    };
+    if (useWebApp) {
+        // Try web_app first
+        return {
+            inline_keyboard: [[
+                { 
+                    text: "▶️ Play Video", 
+                    web_app: { url: cleanUrl }
+                }
+            ]]
+        };
+    } else {
+        // Fallback to regular URL button
+        return {
+            inline_keyboard: [[
+                { 
+                    text: "▶️ Play Video", 
+                    url: cleanUrl
+                }
+            ]]
+        };
+    }
 }
 
 // Bot commands and message handlers
@@ -142,6 +155,8 @@ bot.onText(/\/status/, (msg) => {
 📢 Channels: ${Object.keys(yourChannels).length}
 💾 Active Sessions: ${userSessions.size}
 🕐 Uptime: ${Math.floor(process.uptime())} seconds
+🔘 Button Mode: ${WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'Web App' : 'URL Buttons'}
+⚙️ Force URL Buttons: ${FORCE_URL_BUTTONS ? 'ON' : 'OFF'}
 
 *Configured Channels:*
 ${Object.entries(yourChannels).map(([id, name]) => `• ${name} (\`${id}\`)`).join('\n') || 'None'}`;
@@ -194,7 +209,7 @@ bot.onText(/\/clearsessions/, (msg) => {
     bot.sendMessage(chatId, `✅ Cleared ${sessionCount} old sessions!\n\nNow create a NEW post (send image + link) and it will use web_app properly.`);
 });
 
-// Test web app command
+// Test web app command - Enhanced
 bot.onText(/\/webtest/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id.toString();
@@ -207,16 +222,27 @@ bot.onText(/\/webtest/, async (msg) => {
     try {
         console.log(`🧪 Testing web_app with URL: ${PLAYER_URL}`);
         
+        // Test web_app first
         await bot.sendMessage(chatId, '🧪 *Testing Web App Button*\n\nIf you see the button below and it opens properly, web_app is working!', {
             parse_mode: 'Markdown',
-            reply_markup: createWebAppMarkup(PLAYER_URL)
+            reply_markup: createVideoButtonMarkup(PLAYER_URL, true)
         });
         
-        bot.sendMessage(chatId, '✅ Web app test button sent! If the button appears and opens your player, the setup is correct.');
+        // Test regular URL button as fallback
+        setTimeout(async () => {
+            await bot.sendMessage(chatId, '🔗 *Testing Regular URL Button (Fallback)*\n\nThis is how it looks with a regular URL button:', {
+                parse_mode: 'Markdown',
+                reply_markup: createVideoButtonMarkup(PLAYER_URL, false)
+            });
+            
+            bot.sendMessage(chatId, `✅ Both button types sent!\n\n**Current Mode:** ${WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'Web App' : 'URL Buttons'}\n\nTo force URL buttons, set environment variable:\n\`FORCE_URL_BUTTONS=true\``);
+        }, 1000);
         
     } catch (error) {
         console.error('Web app test error:', error);
-        bot.sendMessage(chatId, `❌ Web app test failed: ${error.message}\n\n*Possible issues:*\n• Bot not configured for web apps with @BotFather\n• Player URL not HTTPS\n• Player URL not publicly accessible`);
+        WEB_APP_SUPPORTED = false;
+        
+        bot.sendMessage(chatId, `❌ Web app test failed: ${error.message}\n\n*Switching to URL buttons as fallback*\n\n**To fix web_app:**\n• Enable Inline Mode with @BotFather\n• Player URL must be HTTPS\n• Player URL must be publicly accessible`);
     }
 });
 
@@ -337,11 +363,13 @@ bot.on('text', async (msg) => {
                 
                 console.log(`📹 Created video link: ${hiddenVideoLink}`);
                 
-                // Send the post with web_app button
+                // Send the post with smart button selection
+                const buttonMarkup = createVideoButtonMarkup(hiddenVideoLink, WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS);
+                
                 await bot.sendPhoto(chatId, session.imageFileId, {
                     caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
                     parse_mode: 'Markdown',
-                    reply_markup: createWebAppMarkup(hiddenVideoLink)
+                    reply_markup: buttonMarkup
                 });
                 
                 if (isAdmin && Object.keys(yourChannels).length > 0) {
@@ -402,34 +430,65 @@ bot.on('callback_query', async (callbackQuery) => {
     }
 });
 
-// Post to specific channel - Fixed with proper error handling
+// Post to specific channel - Enhanced with fallback
 async function postToChannel(channelId, session, originalMessage) {
     const channelName = yourChannels[channelId] || channelId;
     
     try {
-        console.log(`📤 Posting to channel ${channelId} (${channelName}) with web_app`);
+        console.log(`📤 Posting to channel ${channelId} (${channelName})`);
         console.log(`📹 Video URL: ${session.hiddenVideoLink}`);
+        console.log(`🔘 Button type: ${WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'web_app' : 'url'}`);
         
         // Validate the URL before posting
         if (!session.hiddenVideoLink.startsWith('https://')) {
-            throw new Error('Video URL must be HTTPS for web_app');
+            throw new Error('Video URL must be HTTPS');
         }
         
-        // Post with web_app button
-        await bot.sendPhoto(channelId, session.imageFileId, {
-            caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
-            parse_mode: 'Markdown',
-            reply_markup: createWebAppMarkup(session.hiddenVideoLink)
-        });
+        // Try web_app first, fallback to URL button on error
+        let buttonMarkup;
+        let buttonType = 'web_app';
+        
+        if (WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS) {
+            buttonMarkup = createVideoButtonMarkup(session.hiddenVideoLink, true);
+        } else {
+            buttonMarkup = createVideoButtonMarkup(session.hiddenVideoLink, false);
+            buttonType = 'url';
+        }
+        
+        try {
+            // Post with selected button type
+            await bot.sendPhoto(channelId, session.imageFileId, {
+                caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+                parse_mode: 'Markdown',
+                reply_markup: buttonMarkup
+            });
+            
+        } catch (buttonError) {
+            if (buttonError.message.includes('BUTTON_TYPE_INVALID') && buttonType === 'web_app') {
+                console.log('🔄 web_app failed, falling back to URL button...');
+                WEB_APP_SUPPORTED = false;
+                
+                // Retry with URL button
+                await bot.sendPhoto(channelId, session.imageFileId, {
+                    caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+                    parse_mode: 'Markdown',
+                    reply_markup: createVideoButtonMarkup(session.hiddenVideoLink, false)
+                });
+                
+                buttonType = 'url (fallback)';
+            } else {
+                throw buttonError;
+            }
+        }
         
         // Update the original message
-        await bot.editMessageText(`✅ Successfully posted to **${channelName}** with web_app button!`, {
+        await bot.editMessageText(`✅ Successfully posted to **${channelName}**!\n🔘 Button type: ${buttonType}`, {
             chat_id: originalMessage.chat.id,
             message_id: originalMessage.message_id,
             parse_mode: 'Markdown'
         });
         
-        console.log(`✅ Posted successfully to ${channelName}`);
+        console.log(`✅ Posted successfully to ${channelName} (${buttonType})`);
         
     } catch (error) {
         console.error(`❌ Error posting to channel ${channelId} (${channelName}):`, error);
@@ -441,8 +500,8 @@ async function postToChannel(channelId, session, originalMessage) {
             errorMessage += '• Bot is not added to the channel\n• Or channel ID is incorrect';
         } else if (error.message.includes('not enough rights')) {
             errorMessage += '• Bot needs admin rights in the channel';
-        } else if (error.message.includes('web_app')) {
-            errorMessage += '• Web app not properly configured\n• Player URL may not be accessible';
+        } else if (error.message.includes('BUTTON_TYPE_INVALID')) {
+            errorMessage += '• Enable Inline Mode with @BotFather\n• Or set FORCE_URL_BUTTONS=true';
         } else {
             errorMessage += `• ${error.message}`;
         }
@@ -477,7 +536,7 @@ async function postToAllChannels(session, originalMessage) {
             await bot.sendPhoto(channelId, session.imageFileId, {
                 caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
                 parse_mode: 'Markdown',
-                reply_markup: createWebAppMarkup(session.hiddenVideoLink)
+                reply_markup: createVideoButtonMarkup(session.hiddenVideoLink, WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS)
             });
             
             successCount++;
