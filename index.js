@@ -158,9 +158,9 @@ bot.on('text', async (msg) => {
                 session.hiddenVideoLink = hiddenVideoLink;
                 session.step = 'ready';
                 
-                // Send permanent message with play button
-                await bot.sendPhoto(chatId, session.imageFileId, {
-                    caption: " ", // Invisible caption
+                // Send forwardable message with play button
+                await bot.sendMessage(chatId, "🎬 **Video Available**", {
+                    parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [[
                             { 
@@ -171,12 +171,17 @@ bot.on('text', async (msg) => {
                     }
                 });
                 
-                // Clean up the user's messages for a tidy chat
+                // Send image separately (fully forwardable)
+                await bot.sendPhoto(chatId, session.imageFileId, {
+                    caption: " " // Empty caption
+                });
+                
+                // Clean up previous messages
                 try {
                     await bot.deleteMessage(chatId, msg.message_id); // User's link
-                    await bot.deleteMessage(chatId, msg.message_id - 1); // Bot's "Image received" message
+                    await bot.deleteMessage(chatId, msg.message_id - 1); // Bot's "Image received"
                 } catch (deleteError) {
-                    console.log("Cleanup not possible. The video post was still created.");
+                    console.log("Cleanup not possible. Main post was created.");
                 }
                 
                 if (isAdmin) {
