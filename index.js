@@ -50,14 +50,17 @@ bot.onText(/\/start/, (msg) => {
     });
 });
 
-// Admin-only command to post directly to channel
+/// Admin-only command to post directly to channel
 bot.onText(/\/postchannel/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id.toString();
     
+    // DEBUG: Check what values we're getting
+    console.log(`DEBUG: User ID: ${userId}, Admin ID: '${YOUR_USER_ID}', Match: ${userId === YOUR_USER_ID}`);
+    
     // SECURITY CHECK: Only you can use this command
     if (userId !== YOUR_USER_ID) {
-        bot.sendMessage(chatId, '❌ This command is for admin only.');
+        bot.sendMessage(chatId, `❌ Admin only. Your ID: ${userId}, Expected: ${YOUR_USER_ID || 'NOT_SET'}`);
         return;
     }
     
