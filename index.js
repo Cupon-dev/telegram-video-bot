@@ -1,4 +1,4 @@
-// Advanced Telegram Bot with Channel Posting
+// Secure Telegram Bot with Admin-Only Channel Posting
 // Deploy on Railway for 24/7 operation
 
 const TelegramBot = require('node-telegram-bot-api');
@@ -17,10 +17,11 @@ const PLAYER_URL = process.env.PLAYER_URL || 'https://bplyrrr.netlify.app';
 // Webhook URL will be set automatically
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-// Store your channel IDs (you can add multiple)
-const YOUR_CHANNEL_IDS = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [];
 // Your personal Telegram User ID (get it from @userinfobot)
 const YOUR_USER_ID = process.env.ADMIN_USER_ID || '';
+
+// Your channel ID where the bot should post (get it from @username_to_id_bot)
+const YOUR_CHANNEL_ID = process.env.CHANNEL_ID || '';
 
 // Webhook endpoint
 app.post('/webhook', (req, res) => {
@@ -41,48 +42,33 @@ bot.onText(/\/start/, (msg) => {
 3️⃣ I'll create a clean shareable post`;
 
     if (isAdmin) {
-        message += `\n\n*Admin Features:*\nUse /post to share to your channels`;
+        message += `\n\n*Admin Command:*\nUse /postchannel to share directly to your channel`;
     }
-
-    message += `\n\n*No visible links, just images!* 👌`;
 
     bot.sendMessage(chatId, message, {
         parse_mode: 'Markdown'
     });
 });
 
-// Admin command to post to channels
-bot.onText(/\/post/, (msg) => {
+// Admin-only command to post directly to channel
+bot.onText(/\/postchannel/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id.toString();
     
-    // Check if user is admin
+    // SECURITY CHECK: Only you can use this command
     if (userId !== YOUR_USER_ID) {
         bot.sendMessage(chatId, '❌ This command is for admin only.');
         return;
     }
     
     const session = userSessions.get(chatId);
-    if (session && session.step === 'waiting_channel_selection') {
-        bot.sendMessage(chatId, 'Please complete your current post first.');
+    if (!session || session.step !== 'ready') {
+        bot.sendMessage(chatId, '❌ Please create a post first (send image + video link).');
         return;
     }
     
-    if (!session || !session.imageFileId || !session.hiddenVideoLink) {
-        bot.sendMessage(chatId, 'Please create a post first by sending an image and video link.');
-        return;
-    }
-    
-    // Show channel selection keyboard
-    const keyboard = {
-        inline_keyboard: YOUR_CHANNEL_IDS.map(channelId => [
-            { text: `Post to ${channelId}`, callback_data: `post_to:${channelId}` }
-        ])
-    };
-    
-    bot.sendMessage(chatId, 'Select channel to post:', {
-        reply_markup: keyboard
-    });
+    // Post directly to your channel
+    postToChannel(session, chatId);
 });
 
 // Store user sessions
@@ -104,7 +90,8 @@ bot.on('photo', async (msg) => {
             imageFileId: fileId,
             step: 'waiting_video',
             timestamp: Date.now(),
-            isAdmin: isAdmin
+            isAdmin: isAdmin,
+            userId: userId
         });
         
         let message = `📸 *Image received!*
@@ -113,9 +100,7 @@ Now send me your video link:
 \`https://iframe.mediadelivery.net/play/...\``;
 
         if (isAdmin) {
-            message += `\n\nAfter sending the link, use /post to share to your channels.`;
-        } else {
-            message += `\n\nI'll create a clean post with your image! 🎯`;
+            message += `\n\nAfter sending the link, use /postchannel to share directly to your channel.`;
         }
 
         bot.sendMessage(chatId, message, {
@@ -154,38 +139,24 @@ bot.on('text', async (msg) => {
                 // Generate the hidden video link
                 const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
                 
-                // Update session with video link
+                // Update session
                 session.hiddenVideoLink = hiddenVideoLink;
                 session.step = 'ready';
                 
-                // Send forwardable message with play button
-                await bot.sendMessage(chatId, "🎬 **Video Available**", {
+                // Create forwardable post for everyone
+                await bot.sendPhoto(chatId, session.imageFileId, {
+                    caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
                     parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [[
-                            { 
-                                text: "▶️ Play Video", 
-                                web_app: { url: hiddenVideoLink }
-                            }
+                            { text: "▶️ Watch Now", url: hiddenVideoLink }
                         ]]
                     }
                 });
                 
-                // Send image separately (fully forwardable)
-                await bot.sendPhoto(chatId, session.imageFileId, {
-                    caption: " " // Empty caption
-                });
-                
-                // Clean up previous messages
-                try {
-                    await bot.deleteMessage(chatId, msg.message_id); // User's link
-                    await bot.deleteMessage(chatId, msg.message_id - 1); // Bot's "Image received"
-                } catch (deleteError) {
-                    console.log("Cleanup not possible. Main post was created.");
-                }
-                
+                // Additional option for admin
                 if (isAdmin) {
-                    bot.sendMessage(chatId, '✅ Post created! Use /post to share to your channels.');
+                    bot.sendMessage(chatId, '✅ Personal post created! Use /postchannel to share to your channel.');
                 }
                 
             } catch (error) {
@@ -196,62 +167,43 @@ bot.on('text', async (msg) => {
             bot.sendMessage(chatId, '❌ Please send a valid video URL (should contain "mediadelivery.net")');
         }
     } else {
-        // No active session
-        bot.sendMessage(chatId, '📷 Please start by sending me an image first, then I\'ll ask for your video link!');
+        bot.sendMessage(chatId, '📷 Please start by sending me an image first!');
     }
 });
 
-// Handle callback queries (channel selection)
-bot.on('callback_query', async (callbackQuery) => {
-    const message = callbackQuery.message;
-    const chatId = message.chat.id;
-    const data = callbackQuery.data;
-    
-    if (data.startsWith('post_to:')) {
-        const channelId = data.split(':')[1];
-        const session = userSessions.get(chatId);
+// Function to post to channel (admin only)
+async function postToChannel(session, userChatId) {
+    try {
+        // Post to your channel
+        await bot.sendPhoto(YOUR_CHANNEL_ID, session.imageFileId, {
+            caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "▶️ Watch Now", url: session.hiddenVideoLink }
+                ]]
+            }
+        });
         
-        if (!session || !session.hiddenVideoLink) {
-            bot.answerCallbackQuery(callbackQuery.id, { text: 'No post data found. Please create a post first.' });
-            return;
-        }
+        bot.sendMessage(userChatId, '✅ Successfully posted to your channel!');
         
-        try {
-            // Post to channel
-            await bot.sendPhoto(channelId, session.imageFileId, {
-                caption: " ", // Invisible caption
-                reply_markup: {
-                    inline_keyboard: [[
-                        { 
-                            text: "▶️ Play Video", 
-                            web_app: { url: session.hiddenVideoLink }
-                        }
-                    ]]
-                }
-            });
-            
-            bot.answerCallbackQuery(callbackQuery.id, { text: '✅ Posted to channel successfully!' });
-            bot.editMessageText('✅ Posted to channel successfully!', {
-                chat_id: chatId,
-                message_id: message.message_id
-            });
-            
-        } catch (error) {
-            console.error('Channel posting error:', error);
-            bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Failed to post to channel. Make sure bot is admin in channel.' });
-        }
+    } catch (error) {
+        console.error('Channel posting error:', error);
+        bot.sendMessage(userChatId, '❌ Failed to post to channel. Make sure:\n1. Bot is admin in your channel\n2. Channel ID is correct in environment variables');
     }
-});
+}
 
-// Clean up old sessions (every hour)
-setInterval(() => {
+// Clean up old sessions
+setInterval(cleanupSessions, 60 * 60 * 1000);
+
+function cleanupSessions() {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
     for (const [chatId, session] of userSessions.entries()) {
         if (session.timestamp < oneHourAgo) {
             userSessions.delete(chatId);
         }
     }
-}, 60 * 60 * 1000);
+}
 
 function extractVideoInfo(url) {
     try {
