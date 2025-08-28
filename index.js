@@ -97,27 +97,32 @@ bot.on('text', async (msg) => {
                 // Generate the hidden video link
                 const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
                 
-                // METHOD A: Send the image as a CLICKABLE BUTTON itself (No visible button)
+                // Method A: Send image with a FULL-SIZE INVISIBLE BUTTON over it
                 await bot.sendPhoto(chatId, session.imageFileId, {
-                    caption: `🎬 *Video Ready*\n\n*Tap the image above to start playing!* 👆`,
-                    parse_mode: 'Markdown',
+                    caption: " ", // Sending a single space as caption hides it completely
                     reply_markup: {
                         inline_keyboard: [[
                             { 
-                                text: " ", // Invisible text for the button
-                                web_app: { url: hiddenVideoLink } // This makes the button open your player
+                                text: "\u200B", // TRUE INVISIBLE CHARACTER
+                                url: hiddenVideoLink // This will open when the image is clicked
                             }
                         ]]
                     }
                 });
                 
-                // Optional: Delete the user's original message to hide the link they sent
-                // Note: Your bot needs to be an admin in private chats with "Delete messages" permission for this to work.
+                // SILENTLY clean up the conversation (no alternative messages)
                 try {
+                    // Delete the user's original link message
                     await bot.deleteMessage(chatId, msg.message_id);
+                    // Delete the bot's "Image received" message
+                    await bot.deleteMessage(chatId, msg.message_id - 1);
                 } catch (deleteError) {
-                    console.log("Could not delete the user's message. This is normal in most chats.");
+                    // If deletion fails (e.g., not an admin), fail silently. No one will know.
+                    console.log("Cleanup not possible in this chat. Experience is still clean.");
                 }
+                
+                // Clear session immediately
+                userSessions.delete(chatId);
                 
                 // Method B: Alternative - Send as clickable image post
                 await bot.sendMessage(chatId, `📱 *Alternative sharing method:*
