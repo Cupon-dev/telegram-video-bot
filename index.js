@@ -12,7 +12,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || ''; // Get token from environment var
 const bot = new TelegramBot(BOT_TOKEN, { polling: false });
 
 // Your video player URL
-const PLAYER_URL = process.env.PLAYER_URL || 'https://plyrr.netlify.app';
+const PLAYER_URL = process.env.PLAYER_URL || 'https://bplyrr.netlify.app';
 
 // Webhook URL will be set automatically based on deployment platform
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
@@ -97,16 +97,27 @@ bot.on('text', async (msg) => {
                 // Generate the hidden video link
                 const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
                 
-                // Method A: Send image with inline button (COMPLETELY HIDDEN LINK)
+                // METHOD A: Send the image as a CLICKABLE BUTTON itself (No visible button)
                 await bot.sendPhoto(chatId, session.imageFileId, {
-                    caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+                    caption: `🎬 *Video Ready*\n\n*Tap the image above to start playing!* 👆`,
                     parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [[
-                            { text: "▶️ Watch Video", url: hiddenVideoLink }
+                            { 
+                                text: " ", // Invisible text for the button
+                                web_app: { url: hiddenVideoLink } // This makes the button open your player
+                            }
                         ]]
                     }
                 });
+                
+                // Optional: Delete the user's original message to hide the link they sent
+                // Note: Your bot needs to be an admin in private chats with "Delete messages" permission for this to work.
+                try {
+                    await bot.deleteMessage(chatId, msg.message_id);
+                } catch (deleteError) {
+                    console.log("Could not delete the user's message. This is normal in most chats.");
+                }
                 
                 // Method B: Alternative - Send as clickable image post
                 await bot.sendMessage(chatId, `📱 *Alternative sharing method:*
