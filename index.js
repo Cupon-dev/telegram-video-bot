@@ -164,16 +164,32 @@ function extractVideoInfo(url) {
 // Post to channel
 async function postToChannel(channelId, content) {
     try {
+        console.log(`📤 Attempting to post to channel: ${channelId}`);
+        
+        // Verify channel exists
+        if (!yourChannels[channelId]) {
+            throw new Error(`Channel ${channelId} not configured`);
+        }
+        
+        // Verify content exists
+        if (!content || !content.videoUrl || !content.imagePath) {
+            throw new Error('Missing content data');
+        }
+        
+        // Verify image file exists
+        if (!fs.existsSync(content.imagePath)) {
+            throw new Error(`Image file not found: ${content.imagePath}`);
+        }
+        
         const videoInfo = extractVideoInfo(content.videoUrl);
         if (!videoInfo) {
-            console.error('Invalid video URL:', content.videoUrl);
-            return false;
+            throw new Error('Invalid video URL format');
         }
         
         const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
-        
-        // Read image file
         const imageBuffer = fs.readFileSync(content.imagePath);
+        
+        console.log(`🖼️ Sending photo to channel ${channelId}`);
         
         // Post to channel
         await bot.sendPhoto(channelId, imageBuffer, {
@@ -182,14 +198,21 @@ async function postToChannel(channelId, content) {
             reply_markup: {
                 inline_keyboard: [[
                     { 
-                        text: "▶️ Play Now", 
+                        text: "▶️ Play Video", 
                         web_app: { url: hiddenVideoLink }
                     }
                 ]]
             }
         });
         
-        console.log(`✅ Posted to ${yourChannels[channelId] || channelId}`);
+        console.log(`✅ Successfully posted to ${channelId}`);
+        return true;
+        
+    } catch (error) {
+        console.error(`❌ Failed to post to channel ${channelId}:`, error.message);
+        return false;
+    }
+}
         
         // Move used files to archive folder
         archiveContent(channelId, content.textFile, content.imageFile);
