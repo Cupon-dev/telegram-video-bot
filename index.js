@@ -97,41 +97,29 @@ bot.on('text', async (msg) => {
                 // Generate the hidden video link
                 const hiddenVideoLink = `${PLAYER_URL}/?lib=${videoInfo.libId}&id=${videoInfo.videoId}`;
                 
-                // Method A: Send image with a FULL-SIZE INVISIBLE BUTTON over it
+                // Send the image with a CLEAN, ATTRACTIVE button
                 await bot.sendPhoto(chatId, session.imageFileId, {
-                    caption: " ", // Sending a single space as caption hides it completely
+                    caption: " ", // Invisible caption
                     reply_markup: {
                         inline_keyboard: [[
                             { 
-                                text: "\u200B", // TRUE INVISIBLE CHARACTER
-                                url: hiddenVideoLink // This will open when the image is clicked
-                            }
-                        ]]
+                                text: "▶️ Watch Now", // Clear, enticing call to action
+                                url: hiddenVideoLink
+                            }]
+                        ]
                     }
                 });
                 
-                // SILENTLY clean up the conversation (no alternative messages)
+                // Clean up the previous messages for a tidy chat
                 try {
-                    // Delete the user's original link message
-                    await bot.deleteMessage(chatId, msg.message_id);
-                    // Delete the bot's "Image received" message
-                    await bot.deleteMessage(chatId, msg.message_id - 1);
+                    await bot.deleteMessage(chatId, msg.message_id); // User's link
+                    await bot.deleteMessage(chatId, msg.message_id - 1); // Bot's "Image received" message
                 } catch (deleteError) {
-                    // If deletion fails (e.g., not an admin), fail silently. No one will know.
-                    console.log("Cleanup not possible in this chat. Experience is still clean.");
+                    console.log("Cleanup not possible. Experience is still good.");
                 }
                 
-                // Clear session immediately
+                // Clear session
                 userSessions.delete(chatId);
-                
-                // Method B: Alternative - Send as clickable image post
-                await bot.sendMessage(chatId, `📱 *Alternative sharing method:*
-
-Copy this message and forward it to share the video. Recipients will see only the image and button - no URLs visible anywhere! 
-
-Perfect for group chats! 🎯`, {
-                    parse_mode: 'Markdown'
-                });
                 
                 // Clear session
                 userSessions.delete(chatId);
