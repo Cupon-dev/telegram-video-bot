@@ -311,52 +311,40 @@ bot.onText(/\/webtest/, async (msg) => {
     }
 });
 
-// Replace your postToChannel function with this:
+// Post to specific channel - UPDATED with web_app
 async function postToChannel(channelId, session, originalMessage) {
     try {
-        // Try web_app first
-        try {
-            await bot.sendPhoto(channelId, session.imageFileId, {
-                caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[
-                        { 
-                            text: "▶️ Play Video", 
-                            web_app: { url: session.hiddenVideoLink }
-                        }
-                    ]]
-                }
-            });
-        } catch (webAppError) {
-            console.log('web_app failed, falling back to URL');
-            // Fallback to regular URL
-            await bot.sendPhoto(channelId, session.imageFileId, {
-                caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[
-                        { 
-                            text: "▶️ Play Video", 
-                            url: session.hiddenVideoLink
-                        }
-                    ]]
-                }
-            });
-        }
+        console.log(`📤 Posting to channel ${channelId} with web_app`);
+        
+        // Use web_app for in-app experience
+        await bot.sendPhoto(channelId, session.imageFileId, {
+            caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[
+                    { 
+                        text: "▶️ Play Video", 
+                        web_app: { url: session.hiddenVideoLink }
+                    }
+                ]]
+            }
+        });
         
         const channelName = yourChannels[channelId] || channelId;
-        bot.editMessageText(`✅ Posted to ${channelName}!`, {
+        bot.editMessageText(`✅ Posted to ${channelName} (In-App)!`, {
             chat_id: originalMessage.chat.id,
             message_id: originalMessage.message_id
         });
         
     } catch (error) {
         console.error(`Error posting to channel ${channelId}:`, error);
+        
+        // Send error message to admin
         bot.editMessageText(`❌ Failed to post to ${yourChannels[channelId] || channelId}:\n${error.message}`, {
             chat_id: originalMessage.chat.id,
             message_id: originalMessage.message_id
         });
+        
         throw error;
     }
 }
@@ -441,3 +429,19 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+
+// Debug what's being sent to channels
+bot.onText(/\/debugchannel/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id.toString();
+    
+    if (userId !== YOUR_USER_ID) return;
+    
+    const session = userSessions.get(chatId);
+    if (!session || !session.hiddenVideoLink) {
+        bot.sendMessage(chatId, '❌ No active session.');
+        return;
+    }
+    
+    bot.sendMessage(chatId, `🔍 Channel Post Debug:\n\nURL: ${session.hiddenVideoLink}\n\nButton type: web_app\n\nIf channels still show URL, check the postToChannel function.`);
+});
