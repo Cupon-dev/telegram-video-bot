@@ -1,6 +1,8 @@
 // Advanced Telegram Bot with Web App & Multi-Channel Posting
 // Deploy on Railway for 24/7 operation
 
+// Store user sessions
+const userSessions = new Map();
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
