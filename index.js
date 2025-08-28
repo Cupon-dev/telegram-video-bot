@@ -235,14 +235,18 @@ bot.onText(/\/webtest/, async (msg) => {
                 reply_markup: createVideoButtonMarkup(PLAYER_URL, false)
             });
             
-            bot.sendMessage(chatId, `✅ Both button types sent!\n\n**Current Mode:** ${WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'Web App' : 'URL Buttons'}\n\nTo force URL buttons, set environment variable:\n\`FORCE_URL_BUTTONS=true\``);
+            bot.sendMessage(chatId, `✅ Both button types sent!\n\n*Current Mode:* ${WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'Web App' : 'URL Buttons'}\n\nTo force URL buttons, set environment variable:\n\`FORCE_URL_BUTTONS=true\``, {
+                parse_mode: 'Markdown'
+            });
         }, 1000);
         
     } catch (error) {
         console.error('Web app test error:', error);
         WEB_APP_SUPPORTED = false;
         
-        bot.sendMessage(chatId, `❌ Web app test failed: ${error.message}\n\n*Switching to URL buttons as fallback*\n\n**To fix web_app:**\n• Enable Inline Mode with @BotFather\n• Player URL must be HTTPS\n• Player URL must be publicly accessible`);
+        bot.sendMessage(chatId, `❌ Web app test failed: ${error.message}\n\n*Switching to URL buttons as fallback*\n\n*To fix web_app:*\n• Enable Inline Mode with @BotFather\n• Player URL must be HTTPS\n• Player URL must be publicly accessible`, {
+            parse_mode: 'Markdown'
+        });
     }
 });
 
