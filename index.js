@@ -24,6 +24,9 @@ const YOUR_USER_ID = process.env.ADMIN_USER_ID || '';
 const CHANNELS_CONFIG = process.env.CHANNELS_CONFIG || '';
 const yourChannels = parseChannelsConfig(CHANNELS_CONFIG);
 
+// Store user sessions
+const userSessions = new Map();
+
 // Webhook endpoint
 app.post('/webhook', (req, res) => {
     bot.processUpdate(req.body);
@@ -63,9 +66,6 @@ bot.onText(/\/start/, (msg) => {
         parse_mode: 'Markdown'
     });
 });
-
-// Store user sessions
-const userSessions = new Map();
 
 // List available channels
 bot.onText(/\/mychannels/, (msg) => {
@@ -140,9 +140,6 @@ bot.onText(/\/post/, (msg) => {
         reply_markup: keyboard
     });
 });
-
-// Store user sessions
-const userSessions = new Map();
 
 // Handle image uploads
 bot.on('photo', async (msg) => {
@@ -294,6 +291,13 @@ async function postToChannel(channelId, session, originalMessage) {
         
     } catch (error) {
         console.error(`Error posting to channel ${channelId}:`, error);
+        
+        // Send error message to admin
+        bot.editMessageText(`❌ Failed to post to ${yourChannels[channelId] || channelId}:\n${error.message}`, {
+            chat_id: originalMessage.chat.id,
+            message_id: originalMessage.message_id
+        });
+        
         throw error;
     }
 }
@@ -319,16 +323,14 @@ async function postToAllChannels(session, originalMessage) {
 }
 
 // Clean up old sessions
-setInterval(cleanupSessions, 60 * 60 * 1000);
-
-function cleanupSessions() {
+setInterval(() => {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
     for (const [chatId, session] of userSessions.entries()) {
         if (session.timestamp < oneHourAgo) {
             userSessions.delete(chatId);
         }
     }
-}
+}, 60 * 60 * 1000);
 
 function extractVideoInfo(url) {
     try {
