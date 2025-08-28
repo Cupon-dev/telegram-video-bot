@@ -267,21 +267,67 @@ bot.on('callback_query', async (callbackQuery) => {
     }
 });
 
-// Post to specific channel
-async function postToChannel(channelId, session, originalMessage) {
+// Add this command handler
+bot.onText(/\/webtest/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id.toString();
+    
+    if (userId !== YOUR_USER_ID) {
+        bot.sendMessage(chatId, '❌ Admin only.');
+        return;
+    }
+    
     try {
-        await bot.sendPhoto(channelId, session.imageFileId, {
-            caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
-            parse_mode: 'Markdown',
+        // Test web_app button
+        await bot.sendMessage(chatId, 'Testing web_app button...', {
             reply_markup: {
                 inline_keyboard: [[
                     { 
-                        text: "▶️ Play Video", 
-                        web_app: { url: session.hiddenVideoLink }
+                        text: "Test Web App", 
+                        web_app: { url: 'https://bplyrrr.netlify.app' }
                     }
                 ]]
             }
         });
+        bot.sendMessage(chatId, '✅ web_app button test sent! If you see the button, it\'s working.');
+    } catch (error) {
+        bot.sendMessage(chatId, `❌ web_app failed: ${error.message}\n\nPlease enable web app support with @BotFather.`);
+    }
+});
+
+// Replace your postToChannel function with this:
+async function postToChannel(channelId, session, originalMessage) {
+    try {
+        // Try web_app first
+        try {
+            await bot.sendPhoto(channelId, session.imageFileId, {
+                caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[
+                        { 
+                            text: "▶️ Play Video", 
+                            web_app: { url: session.hiddenVideoLink }
+                        }
+                    ]]
+                }
+            });
+        } catch (webAppError) {
+            console.log('web_app failed, falling back to URL');
+            // Fallback to regular URL
+            await bot.sendPhoto(channelId, session.imageFileId, {
+                caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[
+                        { 
+                            text: "▶️ Play Video", 
+                            url: session.hiddenVideoLink
+                        }
+                    ]]
+                }
+            });
+        }
         
         const channelName = yourChannels[channelId] || channelId;
         bot.editMessageText(`✅ Posted to ${channelName}!`, {
@@ -291,13 +337,10 @@ async function postToChannel(channelId, session, originalMessage) {
         
     } catch (error) {
         console.error(`Error posting to channel ${channelId}:`, error);
-        
-        // Send error message to admin
         bot.editMessageText(`❌ Failed to post to ${yourChannels[channelId] || channelId}:\n${error.message}`, {
             chat_id: originalMessage.chat.id,
             message_id: originalMessage.message_id
         });
-        
         throw error;
     }
 }
