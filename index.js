@@ -19,7 +19,7 @@ if (!BOT_TOKEN) {
 const bot = new TelegramBot(BOT_TOKEN, { polling: false });
 
 // Your video player URL - MUST be HTTPS and publicly accessible
-const PLAYER_URL = process.env.PLAYER_URL || 'https://bplyrrr.netlify.app';
+const PLAYER_URL = process.env.PLAYER_URL || 'https://clikplyrr.netlify.app';
 
 // Validate PLAYER_URL
 if (!PLAYER_URL.startsWith('https://')) {
