@@ -1,11 +1,13 @@
-// Advanced Telegram Bot with Web App & Multi-Channel Posting
+// Advanced Telegram Bot with Clickable Image Protection & Multi-Channel Posting
 // Deploy on Railway for 24/7 operation
 
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
+const path = require('path');
 
 const app = express();
 app.use(express.json());
+app.use(express.static('public')); // Serve static files
 
 // Get token from environment variable
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
@@ -26,7 +28,7 @@ if (!PLAYER_URL.startsWith('https://')) {
 }
 
 // Webhook URL will be set automatically
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const WEBHOOK_URL = BASE_URL;
 
 // Your personal Telegram User ID
 const YOUR_USER_ID = process.env.ADMIN_USER_ID || '';
@@ -38,16 +40,52 @@ const yourChannels = parseChannelsConfig(CHANNELS_CONFIG);
 // Store user sessions
 const userSessions = new Map();
 
-// Webhook endpoint
-app.post('/webhook', (req, res) => {
+// Serve protected clickable image pages
+app.get('/play/:postId', async (req, res) => {
+    const postId = req.params.postId;
+    const postData = protectedPosts.get(postId);
+    
+    if (!postData) {
+        return res.status(404).send(`
+            <html>
+                <body style="background: #000; color: #fff; text-align: center; padding: 50px; font-family: sans-serif;">
+                    <h2>❌ Video Not Found</h2>
+                    <p>This video link has expired or is invalid.</p>
+                </body>
+            </html>
+        `);
+    }
+    
     try {
-        bot.processUpdate(req.body);
-        res.sendStatus(200);
+        // Generate and serve the clickable image HTML
+        const html = generateClickableImageHTML(postData.imageUrl, postData.videoUrl, postId);
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+        
+        console.log(`🎬 Served protected post: ${postId}`);
+        
     } catch (error) {
-        console.error('Webhook processing error:', error);
-        res.sendStatus(500);
+        console.error('Error serving protected post:', error);
+        res.status(500).send('Error loading video');
     }
 });
+
+// Clean up old protected posts (every hour)
+setInterval(() => {
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    let cleanedCount = 0;
+    
+    for (const [postId, postData] of protectedPosts.entries()) {
+        if (postData.timestamp < oneHourAgo) {
+            protectedPosts.delete(postId);
+            cleanedCount++;
+        }
+    }
+    
+    if (cleanedCount > 0) {
+        console.log(`🧹 Cleaned up ${cleanedCount} old protected posts`);
+    }
+}, 60 * 60 * 1000);
 
 // Parse channels configuration
 function parseChannelsConfig(config) {
@@ -85,13 +123,33 @@ function extractVideoInfo(url) {
     }
 }
 
-// Create button markup with fallback options
-function createVideoButtonMarkup(url, useWebApp = true) {
-    // Ensure URL is properly formatted
+// Webhook endpoint
+app.post('/webhook', (req, res) => {
+    try {
+        bot.processUpdate(req.body);
+        res.sendStatus(200);
+    } catch (error) {
+        console.error('Webhook processing error:', error);
+        res.sendStatus(500);
+    }
+});
+
+// Create button markup with protected image option
+function createVideoButtonMarkup(url, useWebApp = true, useProtectedImage = false) {
     const cleanUrl = url.trim();
     
-    if (useWebApp) {
-        // Try web_app first
+    if (useProtectedImage) {
+        // Use regular URL button pointing to our protected HTML page
+        return {
+            inline_keyboard: [[
+                { 
+                    text: "🎬 Watch Video", 
+                    url: cleanUrl
+                }
+            ]]
+        };
+    } else if (useWebApp) {
+        // Try web_app
         return {
             inline_keyboard: [[
                 { 
@@ -152,10 +210,12 @@ bot.onText(/\/status/, (msg) => {
     const status = `📊 *Bot Status*
 
 🔗 Player URL: ${PLAYER_URL}
+🌐 Bot URL: ${BASE_URL}
 📢 Channels: ${Object.keys(yourChannels).length}
 💾 Active Sessions: ${userSessions.size}
+🛡️ Protected Posts: ${protectedPosts.size}
 🕐 Uptime: ${Math.floor(process.uptime())} seconds
-🔘 Button Mode: ${WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'Web App' : 'URL Buttons'}
+🔘 Button Mode: ${USE_PROTECTED_IMAGE ? 'Protected Image' : (WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'Web App' : 'URL Buttons')}
 ⚙️ Force URL Buttons: ${FORCE_URL_BUTTONS ? 'ON' : 'OFF'}
 
 *Configured Channels:*
@@ -363,8 +423,19 @@ bot.on('text', async (msg) => {
                 
                 console.log(`📹 Created video link: ${hiddenVideoLink}`);
                 
+                // Create protected post with clickable image
+                let finalUrl;
+                
+                if (USE_PROTECTED_IMAGE) {
+                    // Create protected HTML page with clickable image
+                    finalUrl = await createProtectedPost(session, chatId);
+                } else {
+                    // Use direct video link
+                    finalUrl = hiddenVideoLink;
+                }
+                
                 // Send the post with smart button selection
-                const buttonMarkup = createVideoButtonMarkup(hiddenVideoLink, WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS);
+                const buttonMarkup = createVideoButtonMarkup(finalUrl, WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS, USE_PROTECTED_IMAGE);
                 
                 await bot.sendPhoto(chatId, session.imageFileId, {
                     caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
@@ -430,29 +501,35 @@ bot.on('callback_query', async (callbackQuery) => {
     }
 });
 
-// Post to specific channel - Enhanced with fallback
+// Post to specific channel - Enhanced with protected images
 async function postToChannel(channelId, session, originalMessage) {
     const channelName = yourChannels[channelId] || channelId;
     
     try {
         console.log(`📤 Posting to channel ${channelId} (${channelName})`);
-        console.log(`📹 Video URL: ${session.hiddenVideoLink}`);
-        console.log(`🔘 Button type: ${WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'web_app' : 'url'}`);
         
-        // Validate the URL before posting
-        if (!session.hiddenVideoLink.startsWith('https://')) {
-            throw new Error('Video URL must be HTTPS');
+        // Create protected post URL
+        let finalUrl;
+        let buttonType;
+        
+        if (USE_PROTECTED_IMAGE) {
+            finalUrl = await createProtectedPost(session, originalMessage.chat.id);
+            buttonType = 'protected image';
+        } else {
+            finalUrl = session.hiddenVideoLink;
+            buttonType = WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS ? 'web_app' : 'url';
         }
         
-        // Try web_app first, fallback to URL button on error
-        let buttonMarkup;
-        let buttonType = 'web_app';
+        console.log(`🔗 Final URL: ${finalUrl}`);
+        console.log(`🔘 Button type: ${buttonType}`);
         
-        if (WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS) {
-            buttonMarkup = createVideoButtonMarkup(session.hiddenVideoLink, true);
+        // Create appropriate button markup
+        let buttonMarkup;
+        
+        if (USE_PROTECTED_IMAGE || FORCE_URL_BUTTONS || !WEB_APP_SUPPORTED) {
+            buttonMarkup = createVideoButtonMarkup(finalUrl, false, USE_PROTECTED_IMAGE);
         } else {
-            buttonMarkup = createVideoButtonMarkup(session.hiddenVideoLink, false);
-            buttonType = 'url';
+            buttonMarkup = createVideoButtonMarkup(finalUrl, true, false);
         }
         
         try {
@@ -464,28 +541,32 @@ async function postToChannel(channelId, session, originalMessage) {
             });
             
         } catch (buttonError) {
-            if (buttonError.message.includes('BUTTON_TYPE_INVALID') && buttonType === 'web_app') {
-                console.log('🔄 web_app failed, falling back to URL button...');
+            if (buttonError.message.includes('BUTTON_TYPE_INVALID')) {
+                console.log('🔄 web_app failed, falling back to protected image URL...');
                 WEB_APP_SUPPORTED = false;
                 
-                // Retry with URL button
+                // Create protected post if not already done
+                if (!USE_PROTECTED_IMAGE) {
+                    finalUrl = await createProtectedPost(session, originalMessage.chat.id);
+                }
+                
+                // Retry with URL button pointing to protected page
                 await bot.sendPhoto(channelId, session.imageFileId, {
                     caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
                     parse_mode: 'Markdown',
-                    reply_markup: createVideoButtonMarkup(session.hiddenVideoLink, false)
+                    reply_markup: createVideoButtonMarkup(finalUrl, false, true)
                 });
                 
-                buttonType = 'url (fallback)';
+                buttonType = 'protected image (fallback)';
             } else {
                 throw buttonError;
             }
         }
         
         // Update the original message
-        await bot.editMessageText(`✅ Successfully posted to **${channelName}**!\n🔘 Button type: ${buttonType}`, {
+        await bot.editMessageText(`✅ Successfully posted to ${channelName}!\n🛡️ Mode: ${buttonType}`, {
             chat_id: originalMessage.chat.id,
-            message_id: originalMessage.message_id,
-            parse_mode: 'Markdown'
+            message_id: originalMessage.message_id
         });
         
         console.log(`✅ Posted successfully to ${channelName} (${buttonType})`);
@@ -493,23 +574,19 @@ async function postToChannel(channelId, session, originalMessage) {
     } catch (error) {
         console.error(`❌ Error posting to channel ${channelId} (${channelName}):`, error);
         
-        // Determine error type and provide helpful message
-        let errorMessage = `❌ Failed to post to **${channelName}**\n\n`;
+        let errorMessage = `❌ Failed to post to ${channelName}\n\n`;
         
         if (error.message.includes('chat not found')) {
-            errorMessage += '• Bot is not added to the channel\n• Or channel ID is incorrect';
+            errorMessage += '• Bot not added to channel\n• Check channel ID';
         } else if (error.message.includes('not enough rights')) {
-            errorMessage += '• Bot needs admin rights in the channel';
-        } else if (error.message.includes('BUTTON_TYPE_INVALID')) {
-            errorMessage += '• Enable Inline Mode with @BotFather\n• Or set FORCE_URL_BUTTONS=true';
+            errorMessage += '• Bot needs admin rights';
         } else {
             errorMessage += `• ${error.message}`;
         }
         
         await bot.editMessageText(errorMessage, {
             chat_id: originalMessage.chat.id,
-            message_id: originalMessage.message_id,
-            parse_mode: 'Markdown'
+            message_id: originalMessage.message_id
         });
         
         throw error;
@@ -536,7 +613,7 @@ async function postToAllChannels(session, originalMessage) {
             await bot.sendPhoto(channelId, session.imageFileId, {
                 caption: `🎬 *Video Ready*\n\nTap the button below to watch! 👇`,
                 parse_mode: 'Markdown',
-                reply_markup: createVideoButtonMarkup(session.hiddenVideoLink, WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS)
+                reply_markup: createVideoButtonMarkup(session.hiddenVideoLink, WEB_APP_SUPPORTED && !FORCE_URL_BUTTONS, USE_PROTECTED_IMAGE)
             });
             
             successCount++;
@@ -626,10 +703,13 @@ app.get('/', (req, res) => {
         status: '🤖 Bot is running!',
         timestamp: new Date().toISOString(),
         activeSessions: userSessions.size,
+        protectedPosts: protectedPosts.size,
         configuredChannels: Object.keys(yourChannels).length,
         playerUrl: PLAYER_URL,
+        botUrl: BASE_URL,
         botConfigured: !!BOT_TOKEN,
-        webhookConfigured: !!WEBHOOK_URL
+        webhookConfigured: !!WEBHOOK_URL,
+        protectedImageMode: USE_PROTECTED_IMAGE
     });
 });
 
