@@ -12,7 +12,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const bot = new TelegramBot(BOT_TOKEN, { polling: false });
 
 // Your video player URL
-const PLAYER_URL = process.env.PLAYER_URL || 'https://clikplyrr.netlify.app';
+const PLAYER_URL = process.env.PLAYER_URL || 'https://clitml.netlify.app';
 
 // Webhook URL will be set automatically
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
